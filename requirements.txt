@@ -1,0 +1,4 @@
+starlette
+requests
+uvicorn
+sqlparse
