@@ -7,6 +7,10 @@ class Operand:
         self.value = value
 
 
+    def __repr__(self):
+        return f'<Operand "{str(self)}">'
+
+
     def __str__(self):
         if hasattr(self.value, 'normalized'):
             return self.value.normalized
@@ -22,6 +26,10 @@ class Operation:
         self.operands = []
         # Is either binary or unknown
         self.is_unary = False
+
+
+    def __repr__(self):
+        return f'<Operation "{type(self).__name__}">'
 
 
     def hasEnoughOperands(self, operands):
@@ -111,42 +119,53 @@ class Expression:
         """ Parses the token list / tree tries to identify operators and operands, and bind them together.
         Recurses over sub-expressions. The result from an expression is used in the next expression.
         """
-        operands = []
+        expression_elements = []
+        #operands = []
         tokens = statement.tokens
         tindex = 0
         tlen = len(tokens)
-        operation = None
+        #operation = None
         while tindex < tlen:
             if isinstance(tokens[tindex], sqlparse.sql.Parenthesis):
                 # recurse over parenthesis
-                operands.append(Operand(self.parse(tokens[tindex])))
+                #operands.append(Operand(self.parse(tokens[tindex])))
+                expression_elements.append(Operand(self.parse(tokens[tindex])))
             elif isinstance(tokens[tindex], sqlparse.sql.Token) and tokens[tindex].is_keyword:
                 if tokens[tindex].normalized == 'IS':
-                    operation = Is()
+                    # operation = 
+                    expression_elements.append(Is())
                 elif tokens[tindex].normalized == 'IN':
-                    operation = In()
+                    # operation = 
+                    expression_elements.append(In())
                 elif tokens[tindex].normalized == 'OR':
-                    operation = Or()
+                    # operation = 
+                    expression_elements.append(Or())
                 elif tokens[tindex].normalized == 'AND':
-                    operation = And()
+                    # operation = 
+                    expression_elements.append(And())
                 elif tokens[tindex].normalized == 'NOT NULL' or tokens[tindex].normalized == 'NULL':
-                    operands.append(Operand(tokens[tindex]))
+                    expression_elements.append(Operand(tokens[tindex]))
+                    #operands.append(Operand(tokens[tindex]))
                 elif tokens[tindex].normalized == 'TRUE' or tokens[tindex].normalized == 'FALSE':
-                    operands.append(Operand(tokens[tindex]))
+                    expression_elements.append(Operand(tokens[tindex]))
+                    #operands.append(Operand(tokens[tindex]))
 
             elif isinstance(tokens[tindex], sqlparse.sql.Identifier) \
                 or isinstance(tokens[tindex], sqlparse.sql.Comparison):
-                operands.append(Operand(tokens[tindex]))
-                if operation is not None:
-                    operation.is_unary = True
+                expression_elements.append(Operand(tokens[tindex]))
+            #    operands.append(Operand(tokens[tindex]))
+            #    if operation is not None:
+            #        operation.is_unary = True
+            
 
-            if operation is not None and operation.hasEnoughOperands(operands):
-                operation.operands = operands
-                operands = [Operand(operation)]
-                operation = None
+            #if operation is not None and operation.hasEnoughOperands(operands):
+            #    operation.operands = operands
+            #    operands = [Operand(operation)]
+            #    operation = None
 
             tindex += 1
-        return str(operands[0])
+        return expression_elements
+        #return str(operands[0])
 
 
 if __name__ == '__main__':
