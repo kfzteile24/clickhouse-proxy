@@ -1,3 +1,5 @@
+import simplifier
+
 class FSM: # a tribute to His Holy Noodliness
     """ A finite state machine that parses ODBC query and outputs a query that Clickhouse could understand, the way
     it was supposed to be
@@ -105,7 +107,7 @@ def optimise_joins(tokenized_query):
     needs_identifier    = False
     needs_on_clause     = False
     needs_on_conditions = False
-    for t in tokenized_query:
+    for i, t in enumerate(tokenized_query):
         if t.is_keyword:
             if not needs_identifier and t.normalized in {'JOIN', 'INNER JOIN', 'FROM'}:
                 needs_identifier = True
@@ -114,12 +116,21 @@ def optimise_joins(tokenized_query):
                 continue
             if needs_on_clause and t.is_keyword == True and t.normalized == 'ON':
                 needs_on_conditions = True
+                on_conditions_start = i
                 needs_on_clause = False
                 continue
         if needs_identifier and isinstance(t, sqlparse.sql.Identifier):
             needs_identifier = False
             parse_inner_tokens(t.tokens)
             continue
+        if needs_on_conditions:
+            if t.is_keyword and t.normalized in {'JOIN', 'INNER JOIN', 'WHERE', 'GROUP BY'}:
+                needs_on_conditions = False
+                on_conditions_end = i
+                # TODO: make this pseudocode work
+                new_tokens = simplifier.Expression().parse(tokenized_query[on_conditions_start:on_conditions_end])
+                # TODO: replace tokens
+                continue
 
 
 

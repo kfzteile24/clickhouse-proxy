@@ -6,10 +6,8 @@ class Operand:
     def __init__(self, value):
         self.value = value
 
-
     def __repr__(self):
         return f'<Operand "{str(self)}">'
-
 
     def __str__(self):
         if hasattr(self.value, 'normalized'):
@@ -26,7 +24,7 @@ class Operator:
         self.operands = []
 
     @property
-    def precendence(self):
+    def precedence(self):
         raise Exception(f"precedence not implemented for type {type(self).__name__}")
 
     def __repr__(self):
@@ -147,43 +145,31 @@ class Expression:
         Recurses over sub-expressions. The result from an expression is used in the next expression.
         """
         expression_elements = []
-        #operands = []
-        tokens = statement.tokens
-        tindex = 0
-        tlen = len(tokens)
-        #operation = None
-        while tindex < tlen:
-            if isinstance(tokens[tindex], sqlparse.sql.Parenthesis):
+        for token in statement.tokens:
+            if isinstance(token, sqlparse.sql.Parenthesis):
                 # recurse over parenthesis
-                #operands.append(Operand(self.parse(tokens[tindex])))
-                expression_elements.append(Operand(self.parse(tokens[tindex])))
-            elif isinstance(tokens[tindex], sqlparse.sql.Token) and tokens[tindex].is_keyword:
-                if tokens[tindex].normalized == 'IS':
-                    # operation = 
+                expression_elements.append(Operand(self.parse(token)))
+            elif isinstance(token, sqlparse.sql.Token) and token.is_keyword:
+                normtoken = token.normalized
+                if normtoken == 'IS':
                     expression_elements.append(Is())
-                elif tokens[tindex].normalized == 'IN':
-                    # operation = 
+                elif normtoken == 'IN':
                     expression_elements.append(In())
-                elif tokens[tindex].normalized == 'OR':
-                    # operation = 
+                elif normtoken == 'OR':
                     expression_elements.append(Or())
-                elif tokens[tindex].normalized == 'AND':
-                    # operation = 
+                elif normtoken == 'AND':
                     expression_elements.append(And())
-                elif tokens[tindex].normalized == 'NOT NULL' or tokens[tindex].normalized == 'NULL':
-                    expression_elements.append(Operand(tokens[tindex]))
-                    #operands.append(Operand(tokens[tindex]))
-                elif tokens[tindex].normalized == 'TRUE' or tokens[tindex].normalized == 'FALSE':
-                    expression_elements.append(Operand(tokens[tindex]))
-                    #operands.append(Operand(tokens[tindex]))
+                elif normtoken == 'NOT NULL' or normtoken == 'NULL':
+                    expression_elements.append(Operand(token))
+                elif normtoken == 'TRUE' or normtoken == 'FALSE':
+                    expression_elements.append(Operand(token))
 
-            elif isinstance(tokens[tindex], sqlparse.sql.Identifier) \
-                or isinstance(tokens[tindex], sqlparse.sql.Comparison):
-                expression_elements.append(Operand(tokens[tindex]))
+            elif isinstance(token, sqlparse.sql.Identifier) \
+                or isinstance(token, sqlparse.sql.Comparison):
+                expression_elements.append(Operand(token))
 
-            tindex += 1
-        return expression_elements
-        #return str(operands[0])
+        elements = self.evaluate(expression_elements)
+        return str(elements)
 
     def evaluate(self, expression_elements):
         '''Evaluate an expression expressed as a list of operators and operands, based on operator precedence
@@ -191,10 +177,10 @@ class Expression:
         # We need to remember the order of the operators in the original expression even after we sort them according
         # to precedence
         index_preserved_elements = enumerate(expression_elements)
-        operators_only = [o for o in index_preserved_elements if isinstance(o, Operator)]
+        operators_only = [o for o in index_preserved_elements if isinstance(o[1], Operator)]
         # sort according to precedence first, then according to natural order
-        sorted_operators = sorted([list(t) for t in enumerate(expression_elements)],
-                                  key=lambda e: (e[1].precendence, e[0]))
+        sorted_operators = sorted([list(t) for t in operators_only],
+                                  key=lambda e: (e[1].precedence, e[0]))
         result = None
         for index, op in sorted_operators:
             if index==0 or not op.can_be_binary:
@@ -216,7 +202,7 @@ class Expression:
                 for op in sorted_operators:
                     if op[0] > opindex:
                         op[0] -= 1
-        return result
+        return expression_elements[0]
 
 
 if __name__ == '__main__':
@@ -230,4 +216,7 @@ if __name__ == '__main__':
         ex = Expression('true or true and false')
         assert ex.simplified == 'TRUE', f"Expected TRUE, got {ex.simplified}"
     except AssertionError as err:
-        print(err.args[0], f"\n./{__file__}:{err.__traceback__.tb_lineno}")
+        if err.args:
+            print(err.args[0], f"\n./{__file__}:{err.__traceback__.tb_lineno}")
+        else:
+            raise
