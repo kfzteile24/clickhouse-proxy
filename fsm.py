@@ -99,8 +99,9 @@ class FSM: # a tribute to His Holy Noodliness
 import sqlparse
 
 
-def parse_inner_tokens(tokens):
-    pass
+def replace_join_condition(tokenized_query, start, end):
+    # TODO: make this pseudocode work
+    new_tokens = simplifier.simplify_tokenized(tokenized_query[start:end])
 
 
 def optimise_joins(tokenized_query):
@@ -121,19 +122,14 @@ def optimise_joins(tokenized_query):
                 continue
         if needs_identifier and isinstance(t, sqlparse.sql.Identifier):
             needs_identifier = False
-            parse_inner_tokens(t.tokens)
             continue
         if needs_on_conditions:
             if t.is_keyword and t.normalized in {'JOIN', 'INNER JOIN', 'WHERE', 'GROUP BY'}:
                 needs_on_conditions = False
-                on_conditions_end = i
-                # TODO: make this pseudocode work
-                new_tokens = simplifier.Expression().parse(tokenized_query[on_conditions_start:on_conditions_end])
-                # TODO: replace tokens
+                replace_join_condition(tokenized_query, on_conditions_start, i)
                 continue
-
-
-
+    if needs_on_conditions:
+        replace_join_condition(tokenized_query, on_conditions_start, i)
 
 
 if __name__=='__main__':
@@ -146,4 +142,3 @@ if __name__=='__main__':
 
     parsed = sqlparse.parse(query)[0]
     optimise_joins(parsed)
-

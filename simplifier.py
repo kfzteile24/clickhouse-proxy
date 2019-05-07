@@ -135,86 +135,85 @@ class Not(Operator):
         return 5
 
 
-class Expression:
-    def __init__(self, expression):
-        self.expr = sqlparse.parse(expression)[0]
-        self.simplified = self.parse(self.expr)
+def simplify_sql(sql):
+    expr = sqlparse.parse(sql)[0]
+    return simplify_tokenized(expr)
 
-    def parse(self, statement):
-        """ Parses the token list / tree tries to identify operators and operands, and bind them together.
-        Recurses over sub-expressions. The result from an expression is used in the next expression.
-        """
-        expression_elements = []
-        for token in statement.tokens:
-            if isinstance(token, sqlparse.sql.Parenthesis):
-                # recurse over parenthesis
-                expression_elements.append(Operand(self.parse(token)))
-            elif isinstance(token, sqlparse.sql.Token) and token.is_keyword:
-                normtoken = token.normalized
-                if normtoken == 'IS':
-                    expression_elements.append(Is())
-                elif normtoken == 'IN':
-                    expression_elements.append(In())
-                elif normtoken == 'OR':
-                    expression_elements.append(Or())
-                elif normtoken == 'AND':
-                    expression_elements.append(And())
-                elif normtoken == 'NOT NULL' or normtoken == 'NULL':
-                    expression_elements.append(Operand(token))
-                elif normtoken == 'TRUE' or normtoken == 'FALSE':
-                    expression_elements.append(Operand(token))
-
-            elif isinstance(token, sqlparse.sql.Identifier) \
-                or isinstance(token, sqlparse.sql.Comparison):
+def simplify_tokenized(statement):
+    """ Parses the token list / tree tries to identify operators and operands, and bind them together.
+    Recurses over sub-expressions. The result from an expression is used in the next expression.
+    """
+    expression_elements = []
+    for token in statement.tokens:
+        if isinstance(token, sqlparse.sql.Parenthesis):
+            # recurse over parenthesis
+            expression_elements.append(Operand(simplify_tokenized(token)))
+        elif isinstance(token, sqlparse.sql.Token) and token.is_keyword:
+            normtoken = token.normalized
+            if normtoken == 'IS':
+                expression_elements.append(Is())
+            elif normtoken == 'IN':
+                expression_elements.append(In())
+            elif normtoken == 'OR':
+                expression_elements.append(Or())
+            elif normtoken == 'AND':
+                expression_elements.append(And())
+            elif normtoken == 'NOT NULL' or normtoken == 'NULL':
+                expression_elements.append(Operand(token))
+            elif normtoken == 'TRUE' or normtoken == 'FALSE':
                 expression_elements.append(Operand(token))
 
-        elements = self.evaluate(expression_elements)
-        return str(elements)
+        elif isinstance(token, sqlparse.sql.Identifier) \
+            or isinstance(token, sqlparse.sql.Comparison):
+            expression_elements.append(Operand(token))
 
-    def evaluate(self, expression_elements):
-        '''Evaluate an expression expressed as a list of operators and operands, based on operator precedence
-        '''
-        # We need to remember the order of the operators in the original expression even after we sort them according
-        # to precedence
-        index_preserved_elements = enumerate(expression_elements)
-        operators_only = [o for o in index_preserved_elements if isinstance(o[1], Operator)]
-        # sort according to precedence first, then according to natural order
-        sorted_operators = sorted([list(t) for t in operators_only],
-                                  key=lambda e: (e[1].precedence, e[0]))
-        result = None
-        for index, op in sorted_operators:
-            if index==0 or not op.can_be_binary:
-                # is definitely unary
-                operand_ids = [index-1]
-            else:
-                operand_ids = [index-1, index+1]
-            # if overflow is detected, then we have a wrong expression
-            op.operands = [expression_elements[i] for i in operand_ids]
-            result = Operand(str(op))
-            # Update operator with its actual value
-            expression_elements[index] = result
-            # remove operands that have been processed into the above result
-            # take care of all indexes as well
-            # TODO: This would probably be prettier with a double-linked list
-            for opindex in operand_ids[::-1]:
-                del expression_elements[opindex]
-                # Also update all bigger indexes in sorted_operators since those changed
-                for op in sorted_operators:
-                    if op[0] > opindex:
-                        op[0] -= 1
-        return expression_elements[0]
+    elements = evaluate(expression_elements)
+    return str(elements)
+
+def evaluate(expression_elements):
+    '''Evaluate an expression expressed as a list of operators and operands, based on operator precedence
+    '''
+    # We need to remember the order of the operators in the original expression even after we sort them according
+    # to precedence
+    index_preserved_elements = enumerate(expression_elements)
+    operators_only = [o for o in index_preserved_elements if isinstance(o[1], Operator)]
+    # sort according to precedence first, then according to natural order
+    sorted_operators = sorted([list(t) for t in operators_only],
+                                key=lambda e: (e[1].precedence, e[0]))
+    result = None
+    for index, op in sorted_operators:
+        if index==0 or not op.can_be_binary:
+            # is definitely unary
+            operand_ids = [index-1]
+        else:
+            operand_ids = [index-1, index+1]
+        # if overflow is detected, then we have a wrong expression
+        op.operands = [expression_elements[i] for i in operand_ids]
+        result = Operand(str(op))
+        # Update operator with its actual value
+        expression_elements[index] = result
+        # remove operands that have been processed into the above result
+        # take care of all indexes as well
+        # TODO: This would probably be prettier with a double-linked list
+        for opindex in operand_ids[::-1]:
+            del expression_elements[opindex]
+            # Also update all bigger indexes in sorted_operators since those changed
+            for op in sorted_operators:
+                if op[0] > opindex:
+                    op[0] -= 1
+    return expression_elements[0]
 
 
 if __name__ == '__main__':
     try:
-        ex = Expression('(`asd`.`test` IS NULL) or false')
-        assert ex.simplified == 'FALSE'
-        ex = Expression('(`asd`.`test` IS NOT NULL) or false')
-        assert ex.simplified == 'TRUE'
-        ex = Expression('(`asd`.`test`=`as`.`test` OR ((`asd`.`test` IS NULL) AND (`as`.`test` IS NULL)))')
-        assert ex.simplified == '`asd`.`test`=`as`.`test`'
-        ex = Expression('true or true and false')
-        assert ex.simplified == 'TRUE', f"Expected TRUE, got {ex.simplified}"
+        ex = simplify_sql('(`asd`.`test` IS NULL) or false')
+        assert ex == 'FALSE'
+        ex = simplify_sql('(`asd`.`test` IS NOT NULL) or false')
+        assert ex == 'TRUE'
+        ex = simplify_sql('(`asd`.`test`=`as`.`test` OR ((`asd`.`test` IS NULL) AND (`as`.`test` IS NULL)))')
+        assert ex == '`asd`.`test`=`as`.`test`'
+        ex = simplify_sql('true or true and false')
+        assert ex == 'TRUE', f"Expected TRUE, got {ex}"
     except AssertionError as err:
         if err.args:
             print(err.args[0], f"\n./{__file__}:{err.__traceback__.tb_lineno}")
