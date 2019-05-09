@@ -1,4 +1,5 @@
 import simplifier
+import sqlparse
 
 class FSM: # a tribute to His Holy Noodliness
     """ A finite state machine that parses ODBC query and outputs a query that Clickhouse could understand, the way
@@ -96,13 +97,10 @@ class FSM: # a tribute to His Holy Noodliness
         return [function_name] + inner_contents
 
 
-import sqlparse
-
-
 def replace_join_condition(tokenized_query, start, end):
     simplified_str = simplifier.simplify_tokens(tokenized_query.tokens[start:end])
     del tokenized_query.tokens[start:end]
-    simplified_tokens = sqlparse.parse(simplified_str)[0]
+    simplified_tokens = sqlparse.parse(' ' + simplified_str + ' ')[0]
     for st in simplified_tokens.tokens[::-1]:
         st.parent = tokenized_query
         tokenized_query.tokens.insert(start, st)
@@ -112,10 +110,17 @@ def optimise_joins(tokenized_query):
     needs_identifier    = False
     needs_on_clause     = False
     needs_on_conditions = False
+    join_conditions_to_replace = []
     for i, t in enumerate(tokenized_query):
         if t.is_group:
             # Recurse over group
             optimise_joins(t)
+        if needs_on_conditions:
+            if t.is_keyword and t.normalized in {'JOIN', 'INNER JOIN', 'WHERE', 'GROUP BY'}:
+                needs_on_conditions = False
+                # Simply record that this has to be replaced. Replacement will happen in reverse order
+                # to preserve indexes
+                join_conditions_to_replace.append((on_conditions_start, i))
         if t.is_keyword:
             if not needs_identifier and t.normalized in {'JOIN', 'INNER JOIN', 'FROM'}:
                 needs_identifier = True
@@ -130,13 +135,13 @@ def optimise_joins(tokenized_query):
         if needs_identifier and isinstance(t, sqlparse.sql.Identifier):
             needs_identifier = False
             continue
-        if needs_on_conditions:
-            if t.is_keyword and t.normalized in {'JOIN', 'INNER JOIN', 'WHERE', 'GROUP BY'}:
-                needs_on_conditions = False
-                replace_join_condition(tokenized_query, on_conditions_start, i)
-                continue
+    # If it's the last part of the query, not followed by other keywords
     if needs_on_conditions:
-        replace_join_condition(tokenized_query, on_conditions_start, i)
+        join_conditions_to_replace.append((on_conditions_start, len(tokenized_query.tokens)))
+
+    # Process join conditions in reverse order, to preserve indexes
+    for start, end in join_conditions_to_replace[::-1]:
+        replace_join_condition(tokenized_query, start, end)
 
 
 if __name__=='__main__':
