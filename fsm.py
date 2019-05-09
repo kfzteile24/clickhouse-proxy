@@ -14,13 +14,19 @@ class FSM: # a tribute to His Holy Noodliness
     }
 
 
-    def replace(self, query: str) -> str:
+    def replace_odbc_tokens(self, query: str) -> str:
         self.query = query
         # Fragments of replaced syntax will be appended here
         self.index = 0
         self.qlen = len(self.query)
         fragments = self.free_scan()
         return ''.join(fragments)
+
+
+    def replace_paranoid_joins(self, query: str) -> str:
+        parsed = sqlparse.parse(query)[0]
+        self.optimise_joins(parsed)
+        return str(parsed)
 
 
     def free_scan(self):
@@ -97,51 +103,51 @@ class FSM: # a tribute to His Holy Noodliness
         return [function_name] + inner_contents
 
 
-def replace_join_condition(tokenized_query, start, end):
-    simplified_str = simplifier.simplify_tokens(tokenized_query.tokens[start:end])
-    del tokenized_query.tokens[start:end]
-    simplified_tokens = sqlparse.parse(' ' + simplified_str + ' ')[0]
-    for st in simplified_tokens.tokens[::-1]:
-        st.parent = tokenized_query
-        tokenized_query.tokens.insert(start, st)
+    def replace_join_condition(self, tokenized_query, start, end):
+        simplified_str = simplifier.simplify_tokens(tokenized_query.tokens[start:end])
+        del tokenized_query.tokens[start:end]
+        simplified_tokens = sqlparse.parse(' ' + simplified_str + ' ')[0]
+        for st in simplified_tokens.tokens[::-1]:
+            st.parent = tokenized_query
+            tokenized_query.tokens.insert(start, st)
 
 
-def optimise_joins(tokenized_query):
-    needs_identifier    = False
-    needs_on_clause     = False
-    needs_on_conditions = False
-    join_conditions_to_replace = []
-    for i, t in enumerate(tokenized_query):
-        if t.is_group:
-            # Recurse over group
-            optimise_joins(t)
+    def optimise_joins(self, tokenized_query):
+        needs_identifier    = False
+        needs_on_clause     = False
+        needs_on_conditions = False
+        join_conditions_to_replace = []
+        for i, t in enumerate(tokenized_query):
+            if t.is_group:
+                # Recurse over group
+                self.optimise_joins(t)
+            if needs_on_conditions:
+                if t.is_keyword and t.normalized in {'JOIN', 'INNER JOIN', 'WHERE', 'GROUP BY'}:
+                    needs_on_conditions = False
+                    # Simply record that this has to be replaced. Replacement will happen in reverse order
+                    # to preserve indexes
+                    join_conditions_to_replace.append((on_conditions_start, i))
+            if t.is_keyword:
+                if not needs_identifier and t.normalized in {'JOIN', 'INNER JOIN', 'FROM'}:
+                    needs_identifier = True
+                    if t.normalized in {'JOIN', 'INNER JOIN'}:
+                        needs_on_clause = True
+                    continue
+                if needs_on_clause and t.is_keyword == True and t.normalized == 'ON':
+                    needs_on_conditions = True
+                    on_conditions_start = i + 1
+                    needs_on_clause = False
+                    continue
+            if needs_identifier and isinstance(t, sqlparse.sql.Identifier):
+                needs_identifier = False
+                continue
+        # If it's the last part of the query, not followed by other keywords
         if needs_on_conditions:
-            if t.is_keyword and t.normalized in {'JOIN', 'INNER JOIN', 'WHERE', 'GROUP BY'}:
-                needs_on_conditions = False
-                # Simply record that this has to be replaced. Replacement will happen in reverse order
-                # to preserve indexes
-                join_conditions_to_replace.append((on_conditions_start, i))
-        if t.is_keyword:
-            if not needs_identifier and t.normalized in {'JOIN', 'INNER JOIN', 'FROM'}:
-                needs_identifier = True
-                if t.normalized in {'JOIN', 'INNER JOIN'}:
-                    needs_on_clause = True
-                continue
-            if needs_on_clause and t.is_keyword == True and t.normalized == 'ON':
-                needs_on_conditions = True
-                on_conditions_start = i + 1
-                needs_on_clause = False
-                continue
-        if needs_identifier and isinstance(t, sqlparse.sql.Identifier):
-            needs_identifier = False
-            continue
-    # If it's the last part of the query, not followed by other keywords
-    if needs_on_conditions:
-        join_conditions_to_replace.append((on_conditions_start, len(tokenized_query.tokens)))
+            join_conditions_to_replace.append((on_conditions_start, len(tokenized_query.tokens)))
 
-    # Process join conditions in reverse order, to preserve indexes
-    for start, end in join_conditions_to_replace[::-1]:
-        replace_join_condition(tokenized_query, start, end)
+        # Process join conditions in reverse order, to preserve indexes
+        for start, end in join_conditions_to_replace[::-1]:
+            self.replace_join_condition(tokenized_query, start, end)
 
 
 if __name__=='__main__':
@@ -150,8 +156,6 @@ if __name__=='__main__':
 
     fsm = FSM()
 
-    query = fsm.replace(query)
-
-    parsed = sqlparse.parse(query)[0]
-    optimise_joins(parsed)
-    print(parsed)
+    query = fsm.replace_odbc_tokens(query)
+    query = fsm.replace_paranoid_joins(query)
+    print(query)

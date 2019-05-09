@@ -65,4 +65,4 @@ FROM (
       `Auftragsnummer`
   ) `t7` ON (((`t6`.`Artikelnummer` = `t7`.`Artikelnummer`) OR ((`t6`.`Artikelnummer` IS NULL) AND (`t7`.`Artikelnummer` IS NULL))) AND ((`t6`.`Auftragsnummer` = `t7`.`Auftragsnummer`) OR ((`t6`.`Auftragsnummer` IS NULL) AND (`t7`.`Auftragsnummer` IS NULL))))
   GROUP BY `Akquisekanal__Level_1_`
-) `t8` ON ((`t0`.`Akquisekanal__Level_1_` = `t8`.`Akquisekanal__Level_1_`) OR ((`t0`.`Akquisekanal__Level_1_` IS NULL) AND (`t8`.`Akquisekanal__Level_1_` IS NULL)))
+) `t8` ON ((`t0`.`Akquisekanal__Level_1_` = `t8`.`Akquisekanal__Level_1_`) OR ((`t0`.`Akquisekanal__Level_1_` IS NULL) AND (`t8`.`Akquisekanal__Level_1_` IS NULL))) FORMAT TabSeparatedWithNamesAndTypes;
