@@ -100,8 +100,12 @@ import sqlparse
 
 
 def replace_join_condition(tokenized_query, start, end):
-    # TODO: make this pseudocode work
-    new_tokens = simplifier.simplify_tokenized(tokenized_query[start:end])
+    simplified_str = simplifier.simplify_tokens(tokenized_query.tokens[start:end])
+    del tokenized_query.tokens[start:end]
+    simplified_tokens = sqlparse.parse(simplified_str)[0]
+    for st in simplified_tokens.tokens[::-1]:
+        st.parent = tokenized_query
+        tokenized_query.tokens.insert(start, st)
 
 
 def optimise_joins(tokenized_query):
@@ -109,6 +113,9 @@ def optimise_joins(tokenized_query):
     needs_on_clause     = False
     needs_on_conditions = False
     for i, t in enumerate(tokenized_query):
+        if t.is_group:
+            # Recurse over group
+            optimise_joins(t)
         if t.is_keyword:
             if not needs_identifier and t.normalized in {'JOIN', 'INNER JOIN', 'FROM'}:
                 needs_identifier = True
@@ -117,7 +124,7 @@ def optimise_joins(tokenized_query):
                 continue
             if needs_on_clause and t.is_keyword == True and t.normalized == 'ON':
                 needs_on_conditions = True
-                on_conditions_start = i
+                on_conditions_start = i + 1
                 needs_on_clause = False
                 continue
         if needs_identifier and isinstance(t, sqlparse.sql.Identifier):
@@ -142,3 +149,4 @@ if __name__=='__main__':
 
     parsed = sqlparse.parse(query)[0]
     optimise_joins(parsed)
+    print(parsed)

@@ -143,8 +143,11 @@ def simplify_tokenized(statement):
     """ Parses the token list / tree tries to identify operators and operands, and bind them together.
     Recurses over sub-expressions. The result from an expression is used in the next expression.
     """
+    return simplify_tokens(statement.tokens)
+
+def simplify_tokens(tokens):
     expression_elements = []
-    for token in statement.tokens:
+    for token in tokens:
         if isinstance(token, sqlparse.sql.Parenthesis):
             # recurse over parenthesis
             expression_elements.append(Operand(simplify_tokenized(token)))
