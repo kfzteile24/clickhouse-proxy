@@ -1,8 +1,12 @@
-import sqlparse, operator
+import sqlparse
+
+from typing import List, Tuple
+
 
 class Operand:
     """ Wrapper for any operand made for str(). If it's a token from sqlparse, then use the `normalized` attribute
     """
+
     def __init__(self, value):
         self.value = value
 
@@ -20,6 +24,7 @@ class Operator:
     The evaluated expression will either be a simplified form (scalar) or the expression itself if it can't be
     simplified. Simplification is done using the str() conversion.
     """
+
     def __init__(self):
         self.operands = []
 
@@ -31,15 +36,15 @@ class Operator:
         return f'<Operator "{type(self).__name__}">'
 
     @property
-    def canBeUnary(self):
+    def can_be_unary(self):
         return False
 
     @property
     def can_be_binary(self):
         return True
 
-    def hasEnoughOperands(self, operands):
-        return (self.canBeUnary and len(operands) == 1) or (len(operands) == 2)
+    def has_enough_operands(self):
+        return (self.can_be_unary and len(self.operands) == 1) or (len(self.operands) == 2)
 
 
 class Is(Operator):
@@ -119,7 +124,7 @@ class And(Operator):
 
 
 class Not(Operator):
-    def hasEnoughOperands(self):
+    def has_enough_operands(self):
         return len(self.operands) == 1
 
     def __str__(self):
@@ -135,17 +140,32 @@ class Not(Operator):
         return 5
 
 
+class IndexedOperator:
+    """Acts as a read+write tuple of operator index (order in the list of operations), and operator itself
+    """
+    def __init__(self, index: int, operator: Operator):
+        self.index: index = index
+        self.operator: Operator = operator
+
+
 def simplify_sql(sql):
     expr = sqlparse.parse(sql)[0]
     return simplify_tokenized(expr)
 
-def simplify_tokenized(statement):
+
+def simplify_tokenized(statement: sqlparse.sql.TokenList):
     """ Parses the token list / tree tries to identify operators and operands, and bind them together.
     Recurses over sub-expressions. The result from an expression is used in the next expression.
+    :returns: str
     """
     return simplify_tokens(statement.tokens)
 
-def simplify_tokens(tokens):
+
+def simplify_tokens(tokens: List[sqlparse.sql.Token]):
+    """ Parses the token list / tree tries to identify operators and operands, and bind them together.
+    Recurses over sub-expressions. The result from an expression is used in the next expression.
+    :returns: str
+    """
     expression_elements = []
     for token in tokens:
         if isinstance(token, sqlparse.sql.Parenthesis):
@@ -167,29 +187,32 @@ def simplify_tokens(tokens):
                 expression_elements.append(Operand(token))
 
         elif isinstance(token, sqlparse.sql.Identifier) \
-            or isinstance(token, sqlparse.sql.Comparison):
+                or isinstance(token, sqlparse.sql.Comparison):
             expression_elements.append(Operand(token))
 
     elements = evaluate(expression_elements)
     return str(elements)
 
-def evaluate(expression_elements):
-    '''Evaluate an expression expressed as a list of operators and operands, based on operator precedence
-    '''
+
+def evaluate(expression_elements: list):
+    """Evaluate an expression expressed as a list of operators and operands, based on operator precedence
+    :returns: list
+    """
     # We need to remember the order of the operators in the original expression even after we sort them according
     # to precedence
     index_preserved_elements = enumerate(expression_elements)
-    operators_only = [o for o in index_preserved_elements if isinstance(o[1], Operator)]
+    operators_only: List[IndexedOperator] = [
+        IndexedOperator(o[0], o[1]) for o in index_preserved_elements if isinstance(o[1], Operator)
+    ]
     # sort according to precedence first, then according to natural order
-    sorted_operators = sorted([list(t) for t in operators_only],
-                                key=lambda e: (e[1].precedence, e[0]))
-    result = None
-    for index, op in sorted_operators:
-        if index==0 or not op.can_be_binary:
+    sorted_operators: List[IndexedOperator] = sorted(operators_only, key=lambda e: (e.operator.precedence, e.index))
+    for iop in sorted_operators:
+        index, op = iop.index, iop.operator
+        if index == 0 or not op.can_be_binary:
             # is definitely unary
-            operand_ids = [index-1]
+            operand_ids = [index - 1]
         else:
-            operand_ids = [index-1, index+1]
+            operand_ids = [index - 1, index + 1]
         # if overflow is detected, then we have a wrong expression
         op.operands = [expression_elements[i] for i in operand_ids]
         result = Operand(str(op))
@@ -201,9 +224,9 @@ def evaluate(expression_elements):
         for opindex in operand_ids[::-1]:
             del expression_elements[opindex]
             # Also update all bigger indexes in sorted_operators since those changed
-            for op in sorted_operators:
-                if op[0] > opindex:
-                    op[0] -= 1
+            for sop in sorted_operators:
+                if sop.index > opindex:
+                    sop.index -= 1
     return expression_elements[0]
 
 
