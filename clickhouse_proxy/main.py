@@ -42,23 +42,24 @@ async def homepage(request):
     headers.pop('content-length', None)
     reqlog.debug("overwrite url: " + new_url)
 
-    strbody = body.decode(config.encoding)
-    fsm = FSM()
+    if body:
+        strbody = body.decode(config.encoding)
+        fsm = FSM()
 
-    # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
-    # TODO: Get rid of sqlparse and use a proper state machine without regex. Weigh the benefits of making it a flat
-    # structure
-    fmtmatch = rg.search(strbody)
-    fmtstr = ''
-    if fmtmatch:
-        fmtstr = strbody[fmtmatch.start():]
-        strbody = strbody[:fmtmatch.start()]
-    strbody = fsm.replace_odbc_tokens(strbody)
-    strbody = fsm.replace_paranoid_joins(strbody)
-    body = (strbody + fmtstr).encode(config.encoding)
+        # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
+        # TODO: Get rid of sqlparse and use a proper state machine without regex. Weigh the benefits of making it a flat
+        # structure
+        fmtmatch = rg.search(strbody)
+        fmtstr = ''
+        if fmtmatch:
+            fmtstr = strbody[fmtmatch.start():]
+            strbody = strbody[:fmtmatch.start()]
+        strbody = fsm.replace_odbc_tokens(strbody)
+        strbody = fsm.replace_paranoid_joins(strbody)
+        body = (strbody + fmtstr).encode(config.encoding)
 
-    reqlog.debug("overwrite body:\n\n")
-    reqlog.debug(strbody + fmtstr)
+        reqlog.debug("overwrite body:\n\n")
+        reqlog.debug(strbody + fmtstr)
 
     response = requests.request(request.method, new_url, headers=headers, data=body)
 
