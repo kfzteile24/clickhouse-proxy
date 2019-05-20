@@ -4,6 +4,7 @@ import yaml
 class Config:
     def __init__(self):
         self.log_file = ''
+        self.log_dir_debug = ''
         self.log_level = ''
         self.listen_host = ''
         self.listen_port = ''

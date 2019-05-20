@@ -10,15 +10,15 @@ import requests
 import falcon
 
 
-#logpath = os.path.dirname(config.log_file)
-#if not os.path.exists(logpath):
-#    os.makedirs(logpath)
-#logging.basicConfig(
-#    filename=config.log_file,
-#    level=getattr(logging, config.log_level.upper()),
-#    format='%(asctime)s : %(levelname)s : %(message)s'
-#)
-#reqlog = logging.getLogger(__name__)
+logpath = os.path.dirname(config.log_file)
+if not os.path.exists(logpath):
+    os.makedirs(logpath)
+logging.basicConfig(
+    filename=config.log_file,
+    level=getattr(logging, config.log_level.upper()),
+    format='%(asctime)s : %(levelname)s : %(message)s'
+)
+reqlog = logging.getLogger(__name__)
 
 
 class MainResource(object):
@@ -35,14 +35,18 @@ class MainResource(object):
     def __call__(self, req, resp):
         print(dir(req))
         self.__num += 1
-        reqlog.debug(f"Init request ID: {id(self)}-{self.__num}")
+        call_id = f'{id(self)}-{self.__num}'
+        reqlog.debug(f"Init request ID: {call_id}")
+        self.__fl.begin(call_id)
+        self.__fl.log('request0', str(req)[1:-1])
+        headers = dict(req.headers)
+        self.__fl.log('request0', '\n'.join([f'{k}: {v}' for k, v in headers.items()]))
         url_base = f"{req.scheme}://{req.netloc}"
         new_url = f"{config.clickhouse_scheme}://{config.clickhouse_host}:{config.clickhouse_port}{req.url[len(url_base):]}"
 
         body = req.bounded_stream.read()
-        reqlog.debug("body:\n\n")
-        reqlog.debug(body)
-        headers = dict(req.headers)
+        self.__fl.log('request0', '')
+        self.__fl.log('request0', body)
 
         headers['HOST'] = f'{config.clickhouse_host}:{config.clickhouse_port}'
         headers.pop('CONTENT_LENGTH', None)
