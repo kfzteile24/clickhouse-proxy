@@ -1,6 +1,8 @@
 import logging
 import os
 import re
+import socket
+import struct
 
 from clickhouse_proxy.config import config
 from clickhouse_proxy.file_logger import DummyLogger, FileLogger
@@ -46,6 +48,17 @@ class MainResource(object):
         body = req.bounded_stream.read()
         self.__fl.log('request0', '')
         self.__fl.log('request0', body)
+
+        auth_result = self.__authorise(req.params, req.remote_addr)
+        if auth_result is not None:
+            status = '403 Not Authorized'
+            self.__fl.log('response', status)
+            self.__fl.log('response', dict(resp.headers))
+            self.__fl.log('response', '')
+            self.__fl.log('response', auth_result)
+            resp.status = status
+            resp.body = auth_result
+            return
 
         headers['HOST'] = f'{config.clickhouse_host}:{config.clickhouse_port}'
         headers.pop('CONTENT_LENGTH', None)
