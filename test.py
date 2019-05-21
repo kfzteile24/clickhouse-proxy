@@ -31,16 +31,14 @@ class MainResource(object):
         else:
             self.__fl = DummyLogger()
 
-
     def __call__(self, req, resp):
-        print(dir(req))
         self.__num += 1
         call_id = f'{id(self)}-{self.__num}'
         reqlog.debug(f"Init request ID: {call_id}")
         self.__fl.begin(call_id)
         self.__fl.log('request0', str(req)[1:-1])
         headers = dict(req.headers)
-        self.__fl.log('request0', '\n'.join([f'{k}: {v}' for k, v in headers.items()]))
+        self.__fl.log('request0', dict(headers))
         url_base = f"{req.scheme}://{req.netloc}"
         new_url = f"{config.clickhouse_scheme}://{config.clickhouse_host}:{config.clickhouse_port}{req.url[len(url_base):]}"
 
@@ -50,7 +48,9 @@ class MainResource(object):
 
         headers['HOST'] = f'{config.clickhouse_host}:{config.clickhouse_port}'
         headers.pop('CONTENT_LENGTH', None)
-        reqlog.debug("overwrite url: " + new_url)
+
+        self.__fl.log('request1', f"Request: {req.method} '{new_url}'")
+        self.__fl.log('request1', dict(headers))
 
         if body:
             strbody = body.decode(config.encoding)
@@ -68,14 +68,16 @@ class MainResource(object):
             strbody = fsm.replace_paranoid_joins(strbody)
             body = (strbody + fmtstr).encode(config.encoding)
 
-            reqlog.debug("overwrite body:\n\n")
-            reqlog.debug(strbody + fmtstr)
+            self.__fl.log('request1', '')
+            self.__fl.log('request1', body)
 
         response = requests.request(req.method, new_url, headers=headers, data=body)
 
-        reqlog.debug("Response content type:")
-
         resp.status = f'{response.status_code} {response.reason}'
+        self.__fl.log('response', resp.status)
+        self.__fl.log('response', dict(response.headers))
+        self.__fl.log('response', '')
+        self.__fl.log('response', response.content)
         resp.content_type = response.headers['Content-Type']
         for (k, v) in response.headers.items():
             resp.headers[k.upper()] = v
@@ -98,7 +100,7 @@ def main():
     else:
         # Alternative if no uvicorn
         print("Running in simple_server")
-        httpd = simple_server.make_server('0.0.0.0', 8000, app)
+        httpd = simple_server.make_server(config.listen_host, config.listen_port, app)
         httpd.serve_forever()
 
 

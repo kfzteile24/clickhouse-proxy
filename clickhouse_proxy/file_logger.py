@@ -39,6 +39,8 @@ class FileLogger(DummyLogger):
                 fp.write(message)
                 fp.write(b"\n")
         else:
+            if isinstance(message, dict):
+                message = '\n'.join([f'{k}: {v}' for k, v in message.items()])
             with open(f'{self.__file_loc}/{file_type}', 'a') as fp:
                 fp.write(f'{now: >9.2f}s:  {message}')
                 fp.write("\n")
