@@ -8,3 +8,9 @@ clickhouse_scheme: http
 clickhouse_host: localhost
 clickhouse_port: 8123
 encoding: utf-8
+users:
+  - name: default
+    readonly: False
+    ip:
+      # Allow connections only from these IPs
+      - 127.0.0.1

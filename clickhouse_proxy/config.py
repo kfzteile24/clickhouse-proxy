@@ -12,6 +12,7 @@ class Config:
         self.clickhouse_host = ''
         self.clickhouse_port = ''
         self.encoding = 'utf-8'
+        self.users = []
         with open('config.yml') as fp:
             self.__dict__.update(yaml.safe_load(fp))
 
