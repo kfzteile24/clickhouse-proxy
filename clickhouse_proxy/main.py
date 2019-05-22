@@ -7,6 +7,7 @@ import struct
 from clickhouse_proxy.config import config
 from clickhouse_proxy.file_logger import DummyLogger, FileLogger
 from clickhouse_proxy.fsm import FSM
+from cloclhouse_proxy import auth
 
 import requests
 import falcon
@@ -49,7 +50,7 @@ class MainResource(object):
         self.__fl.log('request0', '')
         self.__fl.log('request0', body)
 
-        auth_result = self.__authorise(req.params, req.remote_addr)
+        auth_result = auth.authorize(req.params, req.remote_addr)
         if auth_result is not None:
             status = '403 Not Authorized'
             self.__fl.log('response', status)
