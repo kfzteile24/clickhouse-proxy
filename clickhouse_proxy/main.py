@@ -7,7 +7,7 @@ import struct
 from clickhouse_proxy.config import config
 from clickhouse_proxy.file_logger import DummyLogger, FileLogger
 from clickhouse_proxy.fsm import FSM
-from cloclhouse_proxy import auth
+from clickhouse_proxy import auth
 
 import requests
 import falcon
@@ -48,7 +48,7 @@ class MainResource(object):
 
         body = req.bounded_stream.read()
         self.__fl.log('request0', '')
-        self.__fl.log('request0', body)
+        self.__fl.log('request0', body[:config.log_length_debug])
 
         auth_result = auth.authorize(req.params, req.remote_addr)
         if auth_result is not None:
@@ -84,7 +84,7 @@ class MainResource(object):
             body = (strbody + fmtstr).encode(config.encoding)
 
             self.__fl.log('request1', '')
-            self.__fl.log('request1', body)
+            self.__fl.log('request1', body[:config.log_length_debug])
 
         response = requests.request(req.method, new_url, headers=headers, data=body)
 
@@ -92,7 +92,7 @@ class MainResource(object):
         self.__fl.log('response', resp.status)
         self.__fl.log('response', dict(response.headers))
         self.__fl.log('response', '')
-        self.__fl.log('response', response.content)
+        self.__fl.log('response', response.content[:config.log_length_debug])
         resp.content_type = response.headers['Content-Type']
         for (k, v) in response.headers.items():
             resp.headers[k.upper()] = v
@@ -104,7 +104,12 @@ class MainResource(object):
 app = falcon.API()
 app.add_sink(MainResource(), r'/.*')
 
-if __name__=='__main__':
+
+def main():
     from wsgiref import simple_server
     httpd = simple_server.make_server(config.listen_host, config.listen_port, app)
     httpd.serve_forever()
+
+
+if __name__=='__main__':
+    main()

@@ -48,9 +48,13 @@ def addressInNetwork(ip, net):
 
     # Convert ips to int
     i_ip = ip_to_bits(ip)
-    netaddr, bits = net.split('/')
-    i_net = ip_to_bits(netaddr)
     total_bits = 32 if not is_ipv6(ip) else 128
+
+    netparts = net.split('/')
+    netaddr = netparts[0]
+    bits = int(netparts[1]) if len(netparts)==2 else total_bits
+    i_net = ip_to_bits(netaddr)
+
     # get a mask of bits of "1" of the length of total_bits
     mask_all = (2 << total_bits) - 1
     # Compute significant bitmask (each bit is 1 except for the last, insignificant ones)
@@ -61,7 +65,7 @@ def addressInNetwork(ip, net):
     return i_ip & bitmask == i_net & bitmask
 
 
-def authorise(params, remote_addr):
+def authorize(params, remote_addr):
     user = params.get('user', 'default')
 
     if user not in config.users:

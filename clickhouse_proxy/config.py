@@ -5,6 +5,7 @@ class Config:
     def __init__(self):
         self.log_file = ''
         self.log_dir_debug = ''
+        self.log_length_debug = 3000
         self.log_level = ''
         self.listen_host = ''
         self.listen_port = ''
