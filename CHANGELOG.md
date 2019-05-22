@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (2019-05-22)
+## 0.2.1 (2019-05-22)
 
 - Migrate to Falcon instead of Starlette, for easier handling of any incoming request
 - Better request-level logging into files

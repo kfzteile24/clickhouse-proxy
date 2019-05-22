@@ -83,9 +83,10 @@ class MainResource(object):
             strbody = fsm.replace_paranoid_joins(strbody)
             body = (strbody + fmtstr).encode(config.encoding)
 
-            self.__fl.log('request1', '')
-            self.__fl.log('request1', body[:config.log_length_debug])
+        self.__fl.log('request1', '')
+        self.__fl.log('request1', body[:config.log_length_debug])
 
+        self.__fl.log('response', "Response:")
         response = requests.request(req.method, new_url, headers=headers, data=body)
 
         resp.status = f'{response.status_code} {response.reason}'

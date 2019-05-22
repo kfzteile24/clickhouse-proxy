@@ -6,7 +6,7 @@ def get_long_description():
 
 setup(
     name='clickhouse-proxy',
-    version='0.2.0',
+    version='0.2.1',
 
     description="HTTP proxy for ODBC queries for ClickHouse",
     long_description=get_long_description(),

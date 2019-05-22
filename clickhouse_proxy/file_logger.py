@@ -34,14 +34,14 @@ class FileLogger(DummyLogger):
     def log(self, file_type, message):
         now = time.process_time() - self.__start
         if isinstance(message, bytes):
-            with open(f'{self.__file_loc}/{file_type}', 'ab') as fp:
+            with open(f'{self.__file_loc}/{file_type}-{self.__id}', 'ab') as fp:
                 fp.write(f'{now: >9.2f}s:  '.encode('utf-8'))
                 fp.write(message)
                 fp.write(b"\n")
         else:
             if isinstance(message, dict):
                 message = '\n'.join([f'{k}: {v}' for k, v in message.items()])
-            with open(f'{self.__file_loc}/{file_type}', 'a') as fp:
+            with open(f'{self.__file_loc}/{file_type}-{self.__id}', 'a') as fp:
                 fp.write(f'{now: >9.2f}s:  {message}')
                 fp.write("\n")
 
