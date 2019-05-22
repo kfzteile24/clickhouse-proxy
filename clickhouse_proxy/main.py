@@ -1,19 +1,17 @@
-from clickhouse_proxy.config import config
-from clickhouse_proxy.fsm import FSM
-
 import logging
 import os
 import re
+import socket
+import struct
+
+from clickhouse_proxy.config import config
+from clickhouse_proxy.file_logger import DummyLogger, FileLogger
+from clickhouse_proxy.fsm import FSM
+from clickhouse_proxy import auth
 
 import requests
-import starlette.responses as resp
-import uvicorn
-from starlette.applications import Starlette
+import falcon
 
-app = Starlette(debug=True)
-
-# sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
-rg = re.compile(r"FORMAT\s+[a-zA-Z]+;$", re.IGNORECASE)
 
 logpath = os.path.dirname(config.log_file)
 if not os.path.exists(logpath):
@@ -26,50 +24,92 @@ logging.basicConfig(
 reqlog = logging.getLogger(__name__)
 
 
-@app.route('/', methods=['GET', 'POST'])
-async def homepage(request):
-    url = request.url
-    url_base = f"{url.scheme}://{url.netloc}"
-    s_url = str(url)
-    new_url = f"{config.clickhouse_scheme}://{config.clickhouse_host}:{config.clickhouse_port}{s_url[len(url_base):]}"
-
-    reqlog.info("incoming request: " + s_url)
-    body = await request.body()
-    reqlog.debug("body:\n\n")
-    reqlog.debug(body)
-    headers = dict(request.headers)
-    headers['host'] = f'{config.clickhouse_host}:{config.clickhouse_port}'
-    headers.pop('content-length', None)
-    reqlog.debug("overwrite url: " + new_url)
-
-    if body:
-        strbody = body.decode(config.encoding)
-        fsm = FSM()
-
+class MainResource(object):
+    def __init__(self):
         # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
-        # TODO: Get rid of sqlparse and use a proper state machine without regex. Weigh the benefits of making it a flat
-        # structure
-        fmtmatch = rg.search(strbody)
-        fmtstr = ''
-        if fmtmatch:
-            fmtstr = strbody[fmtmatch.start():]
-            strbody = strbody[:fmtmatch.start()]
-        strbody = fsm.replace_odbc_tokens(strbody)
-        strbody = fsm.replace_paranoid_joins(strbody)
-        body = (strbody + fmtstr).encode(config.encoding)
+        self.__rg = re.compile(r"FORMAT\s+[a-zA-Z]+;$", re.IGNORECASE)
+        self.__num = 0
+        # A detailed logger for each request, that puts each payload in a separate file
+        if config.log_level.upper() == 'DEBUG':
+            self.__fl = FileLogger(config.log_dir_debug)
+        else:
+            self.__fl = DummyLogger()
 
-        reqlog.debug("overwrite body:\n\n")
-        reqlog.debug(strbody + fmtstr)
+    def __call__(self, req, resp = None):
+        self.__num += 1
+        call_id = f'{id(self)}-{self.__num}'
+        reqlog.debug(f"Init request ID: {call_id}")
+        self.__fl.begin(call_id)
+        self.__fl.log('request0', str(req)[1:-1])
+        headers = dict(req.headers)
+        self.__fl.log('request0', dict(headers))
+        url_base = f"{req.scheme}://{req.netloc}"
+        new_url = f"{config.clickhouse_scheme}://{config.clickhouse_host}:{config.clickhouse_port}{req.url[len(url_base):]}"
 
-    response = requests.request(request.method, new_url, headers=headers, data=body)
+        body = req.bounded_stream.read()
+        self.__fl.log('request0', '')
+        self.__fl.log('request0', body[:config.log_length_debug])
 
-    if response.headers['Content-Type'][:5] == 'text/':
-        return resp.Response(response.content, response.status_code, response.headers)
+        auth_result = auth.authorize(req.params, req.remote_addr)
+        if auth_result is not None:
+            status = '403 Not Authorized'
+            self.__fl.log('response', status)
+            self.__fl.log('response', dict(resp.headers))
+            self.__fl.log('response', '')
+            self.__fl.log('response', auth_result)
+            resp.status = status
+            resp.body = auth_result
+            return
+
+        headers['HOST'] = f'{config.clickhouse_host}:{config.clickhouse_port}'
+        headers.pop('CONTENT_LENGTH', None)
+
+        self.__fl.log('request1', f"Request: {req.method} '{new_url}'")
+        self.__fl.log('request1', dict(headers))
+
+        if body:
+            strbody = body.decode(config.encoding)
+            fsm = FSM()
+
+            # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
+            # TODO: Get rid of sqlparse and use a proper state machine without regex. Weigh the benefits of making it a flat
+            # structure
+            fmtmatch = self.__rg.search(strbody)
+            fmtstr = ''
+            if fmtmatch:
+                fmtstr = strbody[fmtmatch.start():]
+                strbody = strbody[:fmtmatch.start()]
+            strbody = fsm.replace_odbc_tokens(strbody)
+            strbody = fsm.replace_paranoid_joins(strbody)
+            body = (strbody + fmtstr).encode(config.encoding)
+
+            self.__fl.log('request1', '')
+            self.__fl.log('request1', body[:config.log_length_debug])
+
+        response = requests.request(req.method, new_url, headers=headers, data=body)
+
+        resp.status = f'{response.status_code} {response.reason}'
+        self.__fl.log('response', resp.status)
+        self.__fl.log('response', dict(response.headers))
+        self.__fl.log('response', '')
+        self.__fl.log('response', response.content[:config.log_length_debug])
+        resp.content_type = response.headers['Content-Type']
+        for (k, v) in response.headers.items():
+            resp.headers[k.upper()] = v
+        resp.body = response.content
+
+        # More here: https://falcon.readthedocs.io/en/stable/user/quickstart.html
+
+
+app = falcon.API()
+app.add_sink(MainResource(), r'/.*')
 
 
 def main():
-    uvicorn.run(app, host=config.listen_host, port=config.listen_port)
+    from wsgiref import simple_server
+    httpd = simple_server.make_server(config.listen_host, config.listen_port, app)
+    httpd.serve_forever()
 
 
-if __name__ == '__main__':
+if __name__=='__main__':
     main()

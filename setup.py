@@ -6,18 +6,18 @@ def get_long_description():
 
 setup(
     name='clickhouse-proxy',
-    version='0.1.1',
+    version='0.2.0',
 
     description="HTTP proxy for ODBC queries for ClickHouse",
     long_description=get_long_description(),
     long_description_content_type='text/markdown',
 
     install_requires=[
-        'starlette',
+        'falcon',
+        'pyyaml',
         'requests',
-        'uvicorn',
         'sqlparse',
-        'pyyaml'
+        'uvicorn'
     ],
 
     dependency_links=[
