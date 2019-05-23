@@ -1,8 +1,7 @@
 import logging
 import os
 import re
-import socket
-import struct
+import sys
 
 from clickhouse_proxy.config import config
 from clickhouse_proxy.file_logger import DummyLogger, FileLogger
@@ -10,8 +9,6 @@ from clickhouse_proxy.fsm import FSM
 from clickhouse_proxy import auth
 
 import requests
-import falcon
-
 
 logpath = os.path.dirname(config.log_file)
 if not os.path.exists(logpath):
@@ -24,93 +21,159 @@ logging.basicConfig(
 reqlog = logging.getLogger(__name__)
 
 
-class MainResource(object):
-    def __init__(self):
-        # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
-        self.__rg = re.compile(r"FORMAT\s+[a-zA-Z]+;$", re.IGNORECASE)
-        self.__num = 0
-        # A detailed logger for each request, that puts each payload in a separate file
-        if config.log_level.upper() == 'DEBUG':
-            self.__fl = FileLogger(config.log_dir_debug)
-        else:
-            self.__fl = DummyLogger()
-
-    def __call__(self, req, resp = None):
-        self.__num += 1
-        call_id = f'{id(self)}-{self.__num}'
-        reqlog.debug(f"Init request ID: {call_id}")
-        self.__fl.begin(call_id)
-        self.__fl.log('request0', str(req)[1:-1])
-        headers = dict(req.headers)
-        self.__fl.log('request0', dict(headers))
-        url_base = f"{req.scheme}://{req.netloc}"
-        new_url = f"{config.clickhouse_scheme}://{config.clickhouse_host}:{config.clickhouse_port}{req.url[len(url_base):]}"
-
-        body = req.bounded_stream.read()
-        self.__fl.log('request0', '')
-        self.__fl.log('request0', body[:config.log_length_debug])
-
-        auth_result = auth.authorize(req.params, req.remote_addr)
-        if auth_result is not None:
-            status = '403 Not Authorized'
-            self.__fl.log('response', status)
-            self.__fl.log('response', dict(resp.headers))
-            self.__fl.log('response', '')
-            self.__fl.log('response', auth_result)
-            resp.status = status
-            resp.body = auth_result
-            return
-
-        headers['HOST'] = f'{config.clickhouse_host}:{config.clickhouse_port}'
-        headers.pop('CONTENT_LENGTH', None)
-
-        self.__fl.log('request1', f"Request: {req.method} '{new_url}'")
-        self.__fl.log('request1', dict(headers))
-
-        if body:
-            strbody = body.decode(config.encoding)
-            fsm = FSM()
-
-            # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
-            # TODO: Get rid of sqlparse and use a proper state machine without regex. Weigh the benefits of making it a flat
-            # structure
-            fmtmatch = self.__rg.search(strbody)
-            fmtstr = ''
-            if fmtmatch:
-                fmtstr = strbody[fmtmatch.start():]
-                strbody = strbody[:fmtmatch.start()]
-            strbody = fsm.replace_odbc_tokens(strbody)
-            strbody = fsm.replace_paranoid_joins(strbody)
-            body = (strbody + fmtstr).encode(config.encoding)
-
-        self.__fl.log('request1', '')
-        self.__fl.log('request1', body[:config.log_length_debug])
-
-        self.__fl.log('response', "Response:")
-        response = requests.request(req.method, new_url, headers=headers, data=body)
-
-        resp.status = f'{response.status_code} {response.reason}'
-        self.__fl.log('response', resp.status)
-        self.__fl.log('response', dict(response.headers))
-        self.__fl.log('response', '')
-        self.__fl.log('response', response.content[:config.log_length_debug])
-        resp.content_type = response.headers['Content-Type']
-        for (k, v) in response.headers.items():
-            resp.headers[k.upper()] = v
-        resp.body = response.content
-
-        # More here: https://falcon.readthedocs.io/en/stable/user/quickstart.html
+__fmt_rg = re.compile(r"FORMAT\s+[a-zA-Z]+;$", re.IGNORECASE)
+__suffix_rg = re.compile(r"([\r\n]+[0][\r\n]+)+$")
+__num = 0
+# A detailed logger for each request, that puts each payload in a separate file
+if config.log_level.upper() == 'DEBUG':
+    __fl = FileLogger(config.log_dir_debug)
+else:
+    __fl = DummyLogger()
 
 
-app = falcon.API()
-app.add_sink(MainResource(), r'/.*')
+def __match_format_sql(query):
+    # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
+    # TODO: Get rid of sqlparse and use a proper state machine without regex. Weigh the benefits of making it a flat
+    # structure
+    fmtmatch = __fmt_rg.search(query)
+    fmtstr = ''
+    if fmtmatch:
+        fmtstr = query[fmtmatch.start():]
+        query = query[:fmtmatch.start()]
+    return query, fmtstr
+
+
+def __params_to_dict(param_str):
+    # Split everything
+    params = (pv.split('=') for pv in param_str.split('&') if pv)
+    # Organize into dicts with default value True
+    return dict(([kv[0], kv[1] if len(kv)>1 else True] for kv in params))
+
+
+def __headers_to_dict(headers):
+    return dict(([k.decode('utf-8'), v.decode('utf-8')] for k, v in headers))
+
+
+def __dict_to_headers(dheaders):
+    return [[k.encode('utf-8'), v.encode('utf-8')] for k, v in dheaders.items()]
+
+
+def __chunk_request(body):
+    yield body
+
+
+async def read_body(receive):
+    body = b''
+    more_body = True
+    while more_body:
+        message = await receive()
+        body += message.get('body', b'')
+        more_body = message.get('more_body', False)
+    return body
+
+
+async def app(scope, receive, send):
+    if scope['type'] == 'lifespan':
+        return
+
+    global __num
+    __num += 1
+    call_id = f'{id(app)}-{__num:0>5}'
+    params = ''
+    # scope['query_string'] = b'a=b&c=d'
+    if scope.get('query_string', b''):
+        params = '?' + scope['query_string'].decode('utf-8')
+    url_base = f"{scope['scheme']}://{scope['server'][0]}:{scope['server'][1]}"
+    headers = __headers_to_dict(scope["headers"])
+
+    reqlog.debug(f"Init request ID: {call_id}")
+    __fl.begin(call_id)
+    __fl.log('request0', f"Request: {scope['method']} '{url_base}{scope['path']}{params}'")
+    __fl.log('request0', headers)
+
+    # scope['path'] = '/'
+    new_url = f"{config.clickhouse_scheme}://{config.clickhouse_host}:{config.clickhouse_port}{scope['path']}{params}"
+
+    body = await read_body(receive)
+    __fl.log('request0', '')
+    __fl.log('request0', body[:config.log_length_debug])
+
+    # scope['client'] = ('127.0.0.1', 49634)
+    auth_result = auth.authorize(__params_to_dict(params), scope['client'][0])
+    if auth_result is not None:
+        status = '403 Not Authorized'
+        __fl.log('response', status)
+        __fl.log('response', '')
+        __fl.log('response', auth_result)
+        res_headers = {'content-type': 'text/plain'}
+        if headers.get('transfer-encoding', '') == 'chunked':
+            res_headers['transfer-encoding'] = 'chunked'
+        await send({
+            'type': 'http.response.start',
+            'status': 403,
+            'headers': __dict_to_headers(res_headers)
+        })
+        await send({
+            'type': 'http.response.body',
+            'body': auth_result.encode('utf-8')
+        })
+        return
+
+    headers['host'] = f'{config.clickhouse_host}:{config.clickhouse_port}'
+    headers.pop('content_length', None)
+
+    if body:
+        strbody = body.decode(config.encoding)
+
+        # [....] FORMAT whatever;
+        # from the end of the SQL
+        strbody, fmtstr = __match_format_sql(strbody)
+
+        fsm = FSM()
+        strbody = fsm.replace_odbc_tokens(strbody)
+        strbody = fsm.replace_paranoid_joins(strbody)
+        body = (strbody + fmtstr).encode(config.encoding)
+
+    # headers['content_length'] = len(body)
+    __fl.log('request1', f"Request: {scope['method']} '{new_url}'")
+    __fl.log('request1', headers)
+    __fl.log('request1', '')
+    __fl.log('request1', body[:config.log_length_debug])
+
+    __fl.log('response', "Response:")
+    response = requests.request(scope['method'], new_url, headers=headers, data=__chunk_request(body))
+
+    status = f'{response.status_code} {response.reason}'
+    res_headers = dict(response.headers)
+
+    __fl.log('response', status)
+    __fl.log('response', res_headers)
+    __fl.log('response', '')
+    __fl.log('response', response.content[:config.log_length_debug])
+
+    await send({
+        'type': 'http.response.start',
+        'status': response.status_code,
+        'headers': __dict_to_headers(response.headers)
+    })
+    await send({
+        'type': 'http.response.body',
+        'body': response.content
+    })
 
 
 def main():
-    from wsgiref import simple_server
-    httpd = simple_server.make_server(config.listen_host, config.listen_port, app)
-    httpd.serve_forever()
+    import uvicorn
+    uvicorn.run(app)
 
+
+def test():
+    assert __params_to_dict('a=b&c=d&e') == {'a': 'b', 'c': 'd', 'e': True}
+    assert __params_to_dict('&') == {}
+    assert __params_to_dict('') == {}
 
 if __name__=='__main__':
-    main()
+    if len(sys.argv) > 1 and sys.argv[1]=='test':
+        test()
+    else:
+        main()

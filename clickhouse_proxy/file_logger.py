@@ -24,8 +24,6 @@ class FileLogger(DummyLogger):
 
     def begin(self, id):
         self.__id = id
-        self.__start = time.process_time()
-        self.__start_dt = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
         self.__file_loc = f'{self.__location}/{self.__start_dt}'
         if not os.path.isdir(self.__file_loc):
             os.mkdir(self.__file_loc)

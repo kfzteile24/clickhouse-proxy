@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 (2019-05-23)
+
+- Move to uvicorn, for clearer documentation about chunked requests
+
 ## 0.2.1 (2019-05-22)
 
 - Migrate to Falcon instead of Starlette, for easier handling of any incoming request
