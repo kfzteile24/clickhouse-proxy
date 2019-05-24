@@ -3,6 +3,8 @@ import os
 import re
 import sys
 
+from typing import Dict, List, Tuple
+
 from clickhouse_proxy.config import config
 from clickhouse_proxy.file_logger import DummyLogger, FileLogger
 from clickhouse_proxy.fsm import FSM
@@ -31,7 +33,7 @@ else:
     __fl = DummyLogger()
 
 
-def __match_format_sql(query):
+def __match_format_sql(query) -> Tuple[str, str]:
     # sqlparse can't understand ".... FORMAT whatever;" syntax, so let's just take care of it.
     # TODO: Get rid of sqlparse and use a proper state machine without regex. Weigh the benefits of making it a flat
     # structure
@@ -43,18 +45,18 @@ def __match_format_sql(query):
     return query, fmtstr
 
 
-def __params_to_dict(param_str):
+def __params_to_dict(param_str: str) -> Dict[str, str]:
     # Split everything
     params = (pv.split('=') for pv in param_str.split('&') if pv)
     # Organize into dicts with default value True
     return dict(([kv[0], kv[1] if len(kv)>1 else True] for kv in params))
 
 
-def __headers_to_dict(headers):
+def __headers_to_dict(headers: List[List[bytes]]) -> Dict[str, str]:
     return dict(([k.decode('utf-8'), v.decode('utf-8')] for k, v in headers))
 
 
-def __dict_to_headers(dheaders):
+def __dict_to_headers(dheaders: Dict[str, str]) -> List[List[bytes]]:
     return [[k.encode('utf-8'), v.encode('utf-8')] for k, v in dheaders.items()]
 
 
@@ -100,7 +102,7 @@ async def app(scope, receive, send):
 
     # scope['client'] = ('127.0.0.1', 49634)
     auth_result = auth.authorize(__params_to_dict(params), scope['client'][0])
-    if auth_result is not None:
+    if auth_result:
         status = '403 Not Authorized'
         __fl.log('response', status)
         __fl.log('response', '')
@@ -141,7 +143,14 @@ async def app(scope, receive, send):
     __fl.log('request1', body[:config.log_length_debug])
 
     __fl.log('response', "Response:")
-    response = requests.request(scope['method'], new_url, headers=headers, data=__chunk_request(body))
+
+    body_provider = None
+    if headers.get('transfer-encoding', '') == 'chunked':
+        body_provider = __chunk_request(body)
+    else:
+        body_provider = body
+
+    response = requests.request(scope['method'], new_url, headers=headers, data=body_provider)
 
     status = f'{response.status_code} {response.reason}'
     res_headers = dict(response.headers)
@@ -164,7 +173,7 @@ async def app(scope, receive, send):
 
 def main():
     import uvicorn
-    uvicorn.run(app)
+    uvicorn.run(app, host=config.listen_host, port=config.listen_port)
 
 
 def test():
@@ -172,8 +181,9 @@ def test():
     assert __params_to_dict('&') == {}
     assert __params_to_dict('') == {}
 
-if __name__=='__main__':
-    if len(sys.argv) > 1 and sys.argv[1]=='test':
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'test':
         test()
     else:
         main()

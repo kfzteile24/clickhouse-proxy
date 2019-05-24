@@ -1,12 +1,13 @@
 """Logs requests to individual files
 """
-import time, datetime
+import datetime
 import os
+import time
+
 
 class DummyLogger:
     def begin(self, id):
         pass
-
 
     def log(self, file_type, message):
         pass
@@ -18,16 +19,15 @@ class FileLogger(DummyLogger):
         self.__start = time.process_time()
         self.__start_dt = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
         self.__location = log_location
+        self.__file_loc = None
         if not os.path.isdir(log_location):
             os.mkdir(log_location)
 
-
-    def begin(self, id):
-        self.__id = id
+    def begin(self, logger_id):
+        self.__id = logger_id
         self.__file_loc = f'{self.__location}/{self.__start_dt}'
         if not os.path.isdir(self.__file_loc):
             os.mkdir(self.__file_loc)
-
 
     def log(self, file_type, message):
         now = time.process_time() - self.__start

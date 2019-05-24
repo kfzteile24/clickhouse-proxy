@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.3.0 (2019-05-23)
+## 0.3.2 (2019-06-11)
+
+- Transmit body directly if request is not chunked
+
+## 0.3.1 (2019-05-29)
 
 - Move to uvicorn, for clearer documentation about chunked requests
 
